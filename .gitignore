@@ -1,0 +1,61 @@
+# ============================================
+# Motor-driver-IoT Project .gitignore
+# ============================================
+
+# ── OS Files ──
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
+
+# ── IDE / Editor ──
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+.project
+.classpath
+.settings/
+
+# ── Flutter / Dart (app/) ──
+# Most handled by app/.gitignore, but just in case:
+**/build/
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.pub-cache/
+**/.pub/
+**/doc/api/
+
+# ── Android ──
+**/android/app/debug/
+**/android/app/profile/
+**/android/app/release/
+**/android/.gradle/
+**/android/local.properties
+**/android/key.properties
+**/*.jks
+**/*.keystore
+
+# ── Gradle ──
+.gradle/
+**/gradle-wrapper.jar
+
+# ── NodeMCU / Arduino (future firmware/) ──
+**/.pio/
+**/.pioenvs/
+**/.piolibdeps/
+
+# ── Logs & Temp ──
+*.log
+*.tmp
+*.bak
+*.orig
+
+# ── Secrets ──
+*.env
+.env.*
+secrets/
