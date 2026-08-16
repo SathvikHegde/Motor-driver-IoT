@@ -83,11 +83,19 @@ class DriveStatusNotifier extends StateNotifier<AsyncValue<DriveStatus>> {
 
   Future<void> refresh() async {
     try {
-      state = const AsyncValue.loading();
+      // Only show loading spinner on the very first fetch.
+      // Subsequent polls silently update data without flashing.
+      if (state is! AsyncData<DriveStatus>) {
+        state = const AsyncValue.loading();
+      }
       final status = await _apiService.getStatus();
       state = AsyncValue.data(status);
     } catch (e, st) {
-      state = AsyncValue.error(e, st);
+      // If we already have data, keep it and don't show error state
+      // (transient network hiccups shouldn't wipe the screen)
+      if (state is! AsyncData<DriveStatus>) {
+        state = AsyncValue.error(e, st);
+      }
     }
   }
 
@@ -136,8 +144,6 @@ class CommandNotifier extends StateNotifier<AsyncValue<void>> {
 
   Future<bool> start() => sendCommand(DriveCommand.start());
   Future<bool> stop() => sendCommand(DriveCommand.stop());
-  Future<bool> setFrequency(double hz) =>
-      sendCommand(DriveCommand.setFrequency(hz));
 }
 
 final commandProvider =

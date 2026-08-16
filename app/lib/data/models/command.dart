@@ -15,10 +15,6 @@ class DriveCommand {
   /// Stop the motor.
   factory DriveCommand.stop() => const DriveCommand(action: 'stop');
 
-  /// Set target frequency in Hz.
-  factory DriveCommand.setFrequency(double hz) =>
-      DriveCommand(action: 'set_frequency', value: hz);
-
   Map<String, dynamic> toJson() {
     final map = <String, dynamic>{'action': action};
     if (value != null) {

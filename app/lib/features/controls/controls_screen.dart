@@ -1,29 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/app_colors.dart';
 import '../../providers/app_providers.dart';
 import '../../widgets/status_indicator.dart';
 
-class ControlsScreen extends ConsumerStatefulWidget {
+class ControlsScreen extends ConsumerWidget {
   const ControlsScreen({super.key});
 
   @override
-  ConsumerState<ControlsScreen> createState() => _ControlsScreenState();
-}
-
-class _ControlsScreenState extends ConsumerState<ControlsScreen> {
-  double _targetFrequency = 50.0;
-  final _freqController = TextEditingController(text: '50.0');
-
-  @override
-  void dispose() {
-    _freqController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final statusAsync = ref.watch(driveStatusProvider);
     final commandState = ref.watch(commandProvider);
     final isLoading = commandState is AsyncLoading;
@@ -40,7 +25,7 @@ class _ControlsScreenState extends ConsumerState<ControlsScreen> {
           child: Text('Error: $e',
               style: const TextStyle(color: AppColors.textSecondary)),
         ),
-        data: (status) => SingleChildScrollView(
+        data: (status) => Padding(
           padding: const EdgeInsets.all(20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -82,7 +67,7 @@ class _ControlsScreenState extends ConsumerState<ControlsScreen> {
               ),
               const SizedBox(height: 28),
 
-              // Start/Stop Controls
+              // Motor Control Header
               const Text(
                 'Motor Control',
                 style: TextStyle(
@@ -92,6 +77,8 @@ class _ControlsScreenState extends ConsumerState<ControlsScreen> {
                 ),
               ),
               const SizedBox(height: 14),
+
+              // Start / Stop Buttons
               Row(
                 children: [
                   Expanded(
@@ -100,7 +87,8 @@ class _ControlsScreenState extends ConsumerState<ControlsScreen> {
                       label: 'START',
                       color: AppColors.success,
                       enabled: !isLoading && !status.isRunning,
-                      onPressed: () => _confirmAction('start'),
+                      onPressed: () =>
+                          _confirmAction(context, ref, 'start'),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -110,156 +98,11 @@ class _ControlsScreenState extends ConsumerState<ControlsScreen> {
                       label: 'STOP',
                       color: AppColors.error,
                       enabled: !isLoading && status.isRunning,
-                      onPressed: () => _confirmAction('stop'),
+                      onPressed: () =>
+                          _confirmAction(context, ref, 'stop'),
                     ),
                   ),
                 ],
-              ),
-              const SizedBox(height: 32),
-
-              // Frequency Control
-              const Text(
-                'Frequency Setting',
-                style: TextStyle(
-                  color: AppColors.textPrimary,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 14),
-              Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceVariant,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AppColors.border, width: 0.5),
-                ),
-                child: Column(
-                  children: [
-                    // Numeric display
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          _targetFrequency.toStringAsFixed(1),
-                          style: const TextStyle(
-                            color: AppColors.primary,
-                            fontSize: 42,
-                            fontWeight: FontWeight.w800,
-                            height: 1,
-                          ),
-                        ),
-                        const Padding(
-                          padding: EdgeInsets.only(bottom: 4),
-                          child: Text(
-                            ' Hz',
-                            style: TextStyle(
-                              color: AppColors.textTertiary,
-                              fontSize: 18,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-
-                    // Slider
-                    SliderTheme(
-                      data: SliderThemeData(
-                        activeTrackColor: AppColors.primary,
-                        inactiveTrackColor: AppColors.surfaceBright,
-                        thumbColor: AppColors.primary,
-                        overlayColor: AppColors.primary.withValues(alpha: 0.15),
-                        trackHeight: 6,
-                        thumbShape: const RoundSliderThumbShape(
-                          enabledThumbRadius: 10,
-                          elevation: 4,
-                        ),
-                      ),
-                      child: Slider(
-                        value: _targetFrequency,
-                        min: 0,
-                        max: 60,
-                        divisions: 120,
-                        onChanged: (value) {
-                          setState(() {
-                            _targetFrequency = value;
-                            _freqController.text = value.toStringAsFixed(1);
-                          });
-                        },
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    const Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text('0 Hz',
-                            style: TextStyle(
-                              color: AppColors.textTertiary,
-                              fontSize: 11,
-                            )),
-                        Text('60 Hz',
-                            style: TextStyle(
-                              color: AppColors.textTertiary,
-                              fontSize: 11,
-                            )),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Manual input
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _freqController,
-                            keyboardType: const TextInputType.numberWithOptions(
-                                decimal: true),
-                            inputFormatters: [
-                              FilteringTextInputFormatter.allow(
-                                  RegExp(r'^\d*\.?\d{0,1}')),
-                            ],
-                            decoration: const InputDecoration(
-                              labelText: 'Enter frequency',
-                              suffixText: 'Hz',
-                            ),
-                            onChanged: (value) {
-                              final parsed = double.tryParse(value);
-                              if (parsed != null &&
-                                  parsed >= 0 &&
-                                  parsed <= 60) {
-                                setState(() => _targetFrequency = parsed);
-                              }
-                            },
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        SizedBox(
-                          height: 50,
-                          child: ElevatedButton(
-                            onPressed: isLoading
-                                ? null
-                                : () =>
-                                    _confirmAction('set_frequency'),
-                            child: const Text('SET'),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-
-                    // Quick preset buttons
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [10, 20, 30, 40, 50, 60]
-                          .map((freq) => _presetButton(freq.toDouble()))
-                          .toList(),
-                    ),
-                  ],
-                ),
               ),
 
               // Loading indicator
@@ -325,53 +168,23 @@ class _ControlsScreenState extends ConsumerState<ControlsScreen> {
     );
   }
 
-  Widget _presetButton(double freq) {
-    final isActive = _targetFrequency == freq;
-    return OutlinedButton(
-      onPressed: () {
-        setState(() {
-          _targetFrequency = freq;
-          _freqController.text = freq.toStringAsFixed(1);
-        });
-      },
-      style: OutlinedButton.styleFrom(
-        backgroundColor: isActive
-            ? AppColors.primary.withValues(alpha: 0.15)
-            : Colors.transparent,
-        side: BorderSide(
-          color: isActive ? AppColors.primary : AppColors.border,
-          width: isActive ? 1.5 : 1,
-        ),
-        foregroundColor:
-            isActive ? AppColors.primary : AppColors.textSecondary,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      ),
-      child: Text('${freq.toInt()} Hz'),
-    );
-  }
-
-  void _confirmAction(String action) {
-    final messages = {
-      'start': 'Start the motor?',
-      'stop': 'Stop the motor?',
-      'set_frequency':
-          'Set frequency to ${_targetFrequency.toStringAsFixed(1)} Hz?',
-    };
+  void _confirmAction(BuildContext context, WidgetRef ref, String action) {
+    final message = action == 'start' ? 'Start the motor?' : 'Stop the motor?';
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Confirm Action'),
-        content: Text(messages[action] ?? 'Execute command?'),
+        content: Text(message),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
             onPressed: () {
-              Navigator.pop(context);
-              _executeAction(action);
+              Navigator.pop(dialogContext);
+              _executeAction(context, ref, action);
             },
             child: const Text('Confirm'),
           ),
@@ -380,40 +193,28 @@ class _ControlsScreenState extends ConsumerState<ControlsScreen> {
     );
   }
 
-  Future<void> _executeAction(String action) async {
+  Future<void> _executeAction(
+      BuildContext context, WidgetRef ref, String action) async {
     final commandNotifier = ref.read(commandProvider.notifier);
-    bool success;
+    final messenger = ScaffoldMessenger.of(context);
+    final bool success;
 
-    switch (action) {
-      case 'start':
-        success = await commandNotifier.start();
-        break;
-      case 'stop':
-        success = await commandNotifier.stop();
-        break;
-      case 'set_frequency':
-        success =
-            await commandNotifier.setFrequency(_targetFrequency);
-        break;
-      default:
-        return;
+    if (action == 'start') {
+      success = await commandNotifier.start();
+    } else {
+      success = await commandNotifier.stop();
     }
 
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(success
-              ? 'Command sent successfully'
-              : 'Failed to send command'),
-          backgroundColor:
-              success ? AppColors.success : AppColors.error,
-        ),
-      );
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+            success ? 'Command sent successfully' : 'Failed to send command'),
+        backgroundColor: success ? AppColors.success : AppColors.error,
+      ),
+    );
 
-      if (success) {
-        // Refresh status
-        ref.read(driveStatusProvider.notifier).refresh();
-      }
+    if (success) {
+      ref.read(driveStatusProvider.notifier).refresh();
     }
   }
 }
