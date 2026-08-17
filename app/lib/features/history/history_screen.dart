@@ -19,6 +19,14 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   String _selectedRange = '6h';
   String _selectedParam = 'frequency';
 
+  // Interactive zoom & pan state on the timeline
+  double? _visibleMinX;
+  double? _visibleMaxX;
+  double _startMinX = 0.0;
+  double _startMaxX = 0.0;
+  double _startFocalX = 0.0;
+  bool _isInteracting = false;
+
   final Map<String, String> _rangeLabels = {
     '1h': 'Last Hour',
     '6h': 'Last 6 Hours',
@@ -48,6 +56,14 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     final now = DateTime.now();
     final from = _getFromTime(now);
     ref.read(logsProvider.notifier).syncLogs(from: from, to: now);
+  }
+
+  void _resetZoom() {
+    setState(() {
+      _visibleMinX = null;
+      _visibleMaxX = null;
+      _isInteracting = false;
+    });
   }
 
   DateTime _getFromTime(DateTime now) {
@@ -82,6 +98,12 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     }
   }
 
+  bool _isZoomed(int totalPoints) {
+    if (totalPoints <= 2) return false;
+    if (_visibleMinX == null || _visibleMaxX == null) return false;
+    return _visibleMinX! > 0.5 || _visibleMaxX! < (totalPoints - 1.5);
+  }
+
   @override
   Widget build(BuildContext context) {
     final logsAsync = ref.watch(logsProvider);
@@ -105,7 +127,10 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
           IconButton(
             icon: const Icon(Icons.sync_rounded),
             tooltip: 'Sync from NodeMCU',
-            onPressed: _loadData,
+            onPressed: () {
+              _resetZoom();
+              _loadData();
+            },
           ),
         ],
       ),
@@ -126,6 +151,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                     onSelected: (_) {
                       setState(() {
                         _selectedRange = e.key;
+                        _resetZoom();
                       });
                       _loadData();
                     },
@@ -165,6 +191,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                     onSelected: (_) {
                       setState(() {
                         _selectedParam = e.key;
+                        _resetZoom();
                       });
                     },
                     selectedColor: e.value.color.withValues(alpha: 0.2),
@@ -188,9 +215,82 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
               }).toList(),
             ),
           ),
-          const SizedBox(height: 16),
 
-          // Dynamic Chart
+          // Zoom hint / Reset pill
+          logsAsync.maybeWhen(
+            data: (logs) {
+              final isZoomed = _isZoomed(logs.length);
+              if (!isZoomed) return const SizedBox(height: 12);
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.pinch_rounded,
+                          size: 16,
+                          color: AppColors.primary.withValues(alpha: 0.8),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Pinch to zoom • Drag to pan',
+                          style: TextStyle(
+                            color: AppColors.textTertiary,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                    Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: _resetZoom,
+                        borderRadius: BorderRadius.circular(12),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.primary.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: AppColors.primary.withValues(alpha: 0.3),
+                              width: 0.8,
+                            ),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.refresh_rounded,
+                                size: 14,
+                                color: AppColors.primary,
+                              ),
+                              SizedBox(width: 4),
+                              Text(
+                                'Reset View',
+                                style: TextStyle(
+                                  color: AppColors.primary,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+            orElse: () => const SizedBox(height: 12),
+          ),
+
+          // Interactive Chart with gesture detection
           Expanded(
             child: logsAsync.when(
               loading: () => const Center(
@@ -231,7 +331,79 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                     ),
                   );
                 }
-                return _buildChart(logs, config);
+                return LayoutBuilder(
+                  builder: (context, constraints) {
+                    return GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onDoubleTap: _resetZoom,
+                      onScaleStart: (details) {
+                        final totalMaxX = (logs.length - 1).toDouble();
+                        _startMinX = _visibleMinX ?? 0.0;
+                        _startMaxX = _visibleMaxX ?? totalMaxX;
+                        _startFocalX = details.localFocalPoint.dx;
+                        setState(() {
+                          _isInteracting = true;
+                        });
+                      },
+                      onScaleUpdate: (details) {
+                        if (logs.length <= 2) return;
+                        final totalMaxX = (logs.length - 1).toDouble();
+                        final chartWidth =
+                            max(100.0, constraints.maxWidth - 64.0);
+
+                        // Use horizontal scale or combined scale
+                        final scale = details.horizontalScale > 0.01
+                            ? details.horizontalScale
+                            : details.scale;
+
+                        // Calculate new span (window of visible points)
+                        final currentSpan = _startMaxX - _startMinX;
+                        final newSpan = (currentSpan / scale)
+                            .clamp(3.0, max(3.0, totalMaxX));
+
+                        // Relative position of gesture focal point (0.0 to 1.0)
+                        final focalRatio =
+                            ((_startFocalX - 44.0) / chartWidth)
+                                .clamp(0.0, 1.0);
+                        final focalDataX =
+                            _startMinX + (currentSpan * focalRatio);
+
+                        // Pan offset from finger movement
+                        final deltaPixels =
+                            details.localFocalPoint.dx - _startFocalX;
+                        final deltaData =
+                            -(deltaPixels / chartWidth) * newSpan;
+
+                        double newMinX =
+                            focalDataX - (newSpan * focalRatio) + deltaData;
+                        double newMaxX = newMinX + newSpan;
+
+                        // Clamp within boundaries [0, totalMaxX]
+                        if (newMinX < 0) {
+                          newMaxX += -newMinX;
+                          newMinX = 0;
+                        }
+                        if (newMaxX > totalMaxX) {
+                          newMinX -= (newMaxX - totalMaxX);
+                          newMaxX = totalMaxX;
+                        }
+                        newMinX = newMinX.clamp(0.0, totalMaxX - 2.0);
+                        newMaxX = newMaxX.clamp(newMinX + 2.0, totalMaxX);
+
+                        setState(() {
+                          _visibleMinX = newMinX;
+                          _visibleMaxX = newMaxX;
+                        });
+                      },
+                      onScaleEnd: (_) {
+                        setState(() {
+                          _isInteracting = false;
+                        });
+                      },
+                      child: _buildChart(logs, config),
+                    );
+                  },
+                );
               },
             ),
           ),
@@ -272,25 +444,35 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
       );
     }).toList();
 
-    // Dynamically calculate clean Y-scale
-    final values = logs.map(_getParamValue).toList();
-    final dataMinY = values.reduce((a, b) => a < b ? a : b);
-    final dataMaxY = values.reduce((a, b) => a > b ? a : b);
+    final totalPoints = logs.length;
+    final totalMaxX = (totalPoints - 1).toDouble();
+    final effectiveMinX = _visibleMinX ?? 0.0;
+    final effectiveMaxX = _visibleMaxX ?? totalMaxX;
+
+    // Dynamically calculate Y-scale based on points visible in current viewport
+    final startIdx = effectiveMinX.floor().clamp(0, totalPoints - 1);
+    final endIdx = effectiveMaxX.ceil().clamp(startIdx, totalPoints - 1);
+    final visibleLogs = logs.sublist(startIdx, endIdx + 1);
+    final visibleValues = visibleLogs.map(_getParamValue).toList();
+
+    final dataMinY = visibleValues.reduce((a, b) => a < b ? a : b);
+    final dataMaxY = visibleValues.reduce((a, b) => a > b ? a : b);
     final scale = _ChartScale.calculate(dataMinY, dataMaxY);
 
-    // Determine X-axis date formatting based on range
+    // Dynamic X-axis interval and date format
     final isMultiDay = _selectedRange == '7d';
-    final DateFormat timeFormat =
-        isMultiDay ? DateFormat('MM/dd HH:mm') : DateFormat.Hm();
-
-    // Determine step for bottom titles (aim for 4 to 5 ticks)
-    final double xInterval =
-        logs.length > 5 ? (logs.length / 4).ceilToDouble() : 1.0;
+    final visibleSpan = effectiveMaxX - effectiveMinX;
+    final double xInterval = max(1.0, (visibleSpan / 4).floorToDouble());
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 20, 8),
       child: LineChart(
         LineChartData(
+          minX: effectiveMinX,
+          maxX: effectiveMaxX,
+          minY: scale.minY,
+          maxY: scale.maxY,
+          clipData: const FlClipData.all(),
           gridData: FlGridData(
             show: true,
             drawVerticalLine: false,
@@ -310,8 +492,9 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                 interval: scale.interval,
                 reservedSize: 52,
                 getTitlesWidget: (value, meta) {
-                  // Only show titles within calculated range
-                  if (value < scale.minY - 0.001 || value > scale.maxY + 0.001) {
+                  // Only show titles strictly within the calculated range
+                  if (value < scale.minY - 0.001 ||
+                      value > scale.maxY + 0.001) {
                     return const SizedBox.shrink();
                   }
                   final text = scale.decimalDigits == 0
@@ -339,16 +522,29 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                 reservedSize: 32,
                 interval: xInterval,
                 getTitlesWidget: (value, meta) {
-                  final index = value.toInt();
+                  final index = value.round();
                   if (index < 0 || index >= logs.length) {
                     return const SizedBox.shrink();
                   }
+                  if (value < effectiveMinX - 0.2 ||
+                      value > effectiveMaxX + 0.2) {
+                    return const SizedBox.shrink();
+                  }
                   final dt = logs[index].timestamp;
+                  final String text;
+                  if (isMultiDay && visibleSpan > 50) {
+                    text = DateFormat('MM/dd HH:mm').format(dt);
+                  } else if (visibleSpan <= 15) {
+                    text = DateFormat('HH:mm:ss').format(dt);
+                  } else {
+                    text = DateFormat.Hm().format(dt);
+                  }
+
                   return SideTitleWidget(
                     meta: meta,
                     space: 6,
                     child: Text(
-                      timeFormat.format(dt),
+                      text,
                       style: const TextStyle(
                         color: AppColors.textTertiary,
                         fontSize: 10,
@@ -371,7 +567,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
               barWidth: 2.8,
               isStrokeCapRound: true,
               dotData: FlDotData(
-                show: logs.length <= 25,
+                show: visibleSpan <= 25,
                 getDotPainter: (spot, percent, bar, index) {
                   return FlDotCirclePainter(
                     radius: 3.5,
@@ -395,7 +591,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
             ),
           ],
           lineTouchData: LineTouchData(
-            handleBuiltInTouches: true,
+            // When user is actively pinching/panning, disable tooltip so it doesn't fight touch
+            handleBuiltInTouches: !_isInteracting,
             touchTooltipData: LineTouchTooltipData(
               getTooltipColor: (_) => AppColors.surfaceElevated,
               tooltipRoundedRadius: 10,
@@ -433,10 +630,12 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
               },
             ),
           ),
-          minY: scale.minY,
-          maxY: scale.maxY,
         ),
-        duration: const Duration(milliseconds: 350),
+        // ZERO duration during touch interaction for 60/120fps direct tracking;
+        // smooth 350ms easing on release / reset / parameter switch!
+        duration: _isInteracting
+            ? Duration.zero
+            : const Duration(milliseconds: 350),
         curve: Curves.easeInOutCubic,
       ),
     );
