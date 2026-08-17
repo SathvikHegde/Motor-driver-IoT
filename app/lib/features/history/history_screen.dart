@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../core/theme/app_colors.dart';
 import '../../data/models/log_entry.dart';
+import '../../data/services/csv_exporter.dart';
 import '../../providers/app_providers.dart';
 
 class HistoryScreen extends ConsumerStatefulWidget {
@@ -16,6 +17,10 @@ class HistoryScreen extends ConsumerStatefulWidget {
 class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   String _selectedRange = '6h';
   String _selectedParam = 'frequency';
+
+  // Pinch-to-zoom state for Y-axis
+  double _yZoomLevel = 1.0; // 1.0 = fit data, >1 = zoomed in
+  double _yZoomStart = 1.0;
 
   final Map<String, String> _rangeLabels = {
     '1h': 'Last Hour',
@@ -80,6 +85,10 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     }
   }
 
+  void _resetZoom() {
+    setState(() => _yZoomLevel = 1.0);
+  }
+
   @override
   Widget build(BuildContext context) {
     final logsAsync = ref.watch(logsProvider);
@@ -89,6 +98,17 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
       appBar: AppBar(
         title: const Text('History'),
         actions: [
+          // Export CSV button
+          logsAsync.whenOrNull(
+                data: (logs) => logs.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.file_download_outlined),
+                        tooltip: 'Export as CSV',
+                        onPressed: () => _exportCsv(logs),
+                      )
+                    : null,
+              ) ??
+              const SizedBox.shrink(),
           IconButton(
             icon: const Icon(Icons.sync_rounded),
             tooltip: 'Sync from NodeMCU',
@@ -111,7 +131,10 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                     label: Text(e.value),
                     selected: isSelected,
                     onSelected: (_) {
-                      setState(() => _selectedRange = e.key);
+                      setState(() {
+                        _selectedRange = e.key;
+                        _yZoomLevel = 1.0; // reset zoom on range change
+                      });
                       _loadData();
                     },
                     selectedColor: AppColors.primary.withValues(alpha: 0.2),
@@ -148,7 +171,10 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                     label: Text(e.value.label),
                     selected: isSelected,
                     onSelected: (_) {
-                      setState(() => _selectedParam = e.key);
+                      setState(() {
+                        _selectedParam = e.key;
+                        _yZoomLevel = 1.0; // reset zoom on param change
+                      });
                     },
                     selectedColor: e.value.color.withValues(alpha: 0.2),
                     labelStyle: TextStyle(
@@ -171,9 +197,50 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
               }).toList(),
             ),
           ),
-          const SizedBox(height: 16),
 
-          // Chart
+          // Zoom indicator
+          if (_yZoomLevel != 1.0)
+            Padding(
+              padding: const EdgeInsets.only(top: 8, right: 16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.zoom_in_rounded,
+                            color: AppColors.primary, size: 14),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${_yZoomLevel.toStringAsFixed(1)}x',
+                          style: const TextStyle(
+                            color: AppColors.primary,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        GestureDetector(
+                          onTap: _resetZoom,
+                          child: const Icon(Icons.close_rounded,
+                              color: AppColors.primary, size: 14),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          const SizedBox(height: 8),
+
+          // Chart with pinch-to-zoom
           Expanded(
             child: logsAsync.when(
               loading: () => const Center(
@@ -211,7 +278,18 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                     ),
                   );
                 }
-                return _buildChart(logs, config);
+                return GestureDetector(
+                  onScaleStart: (_) {
+                    _yZoomStart = _yZoomLevel;
+                  },
+                  onScaleUpdate: (details) {
+                    setState(() {
+                      _yZoomLevel =
+                          (_yZoomStart * details.scale).clamp(0.5, 10.0);
+                    });
+                  },
+                  child: _buildChart(logs, config),
+                );
               },
             ),
           ),
@@ -229,6 +307,21 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     );
   }
 
+  Future<void> _exportCsv(List<LogEntry> logs) async {
+    try {
+      await CsvExporter.exportLogs(logs);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Export failed: $e'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    }
+  }
+
   Widget _buildChart(List<LogEntry> logs, _ParamConfig config) {
     final spots = logs.asMap().entries.map((e) {
       return FlSpot(
@@ -239,9 +332,17 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
 
     // Calculate min/max for Y axis
     final values = logs.map(_getParamValue).toList();
-    final minY = values.reduce((a, b) => a < b ? a : b);
-    final maxY = values.reduce((a, b) => a > b ? a : b);
-    final yPadding = (maxY - minY) * 0.15;
+    final dataMinY = values.reduce((a, b) => a < b ? a : b);
+    final dataMaxY = values.reduce((a, b) => a > b ? a : b);
+    final dataRange = dataMaxY - dataMinY;
+    final basePadding = dataRange > 0 ? dataRange * 0.15 : 1.0;
+
+    // Apply zoom: zoom > 1 narrows the visible Y range around the center
+    final center = (dataMinY + dataMaxY) / 2;
+    final halfRange = (dataRange + basePadding * 2) / (2 * _yZoomLevel);
+    final minY = center - halfRange;
+    final maxY = center + halfRange;
+    final visibleRange = maxY - minY;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -250,8 +351,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
           gridData: FlGridData(
             show: true,
             drawVerticalLine: false,
-            horizontalInterval: (maxY - minY) > 0
-                ? (maxY - minY) / 4
+            horizontalInterval: visibleRange > 0
+                ? visibleRange / 4
                 : 1,
             getDrawingHorizontalLine: (value) => FlLine(
               color: AppColors.border.withValues(alpha: 0.5),
@@ -304,6 +405,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
             ),
           ),
           borderData: FlBorderData(show: false),
+          clipData: const FlClipData.all(), // clip line to chart area when zoomed
           lineBarsData: [
             LineChartBarData(
               spots: spots,
@@ -366,8 +468,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
               },
             ),
           ),
-          minY: minY - yPadding,
-          maxY: maxY + yPadding,
+          minY: minY,
+          maxY: maxY,
         ),
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeOut,

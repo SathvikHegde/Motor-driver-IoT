@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../core/theme/app_colors.dart';
 import '../../data/models/fault.dart';
+import '../../data/services/csv_exporter.dart';
 import '../../providers/app_providers.dart';
 
 class FaultsScreen extends ConsumerStatefulWidget {
@@ -30,6 +31,17 @@ class _FaultsScreenState extends ConsumerState<FaultsScreen> {
       appBar: AppBar(
         title: const Text('Fault Log'),
         actions: [
+          // Export CSV button
+          faultsAsync.whenOrNull(
+                data: (faults) => faults.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.file_download_outlined),
+                        tooltip: 'Export as CSV',
+                        onPressed: () => _exportFaultsCsv(faults),
+                      )
+                    : null,
+              ) ??
+              const SizedBox.shrink(),
           IconButton(
             icon: const Icon(Icons.sync_rounded),
             tooltip: 'Sync from NodeMCU',
@@ -158,6 +170,21 @@ class _FaultsScreenState extends ConsumerState<FaultsScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _exportFaultsCsv(List<Fault> faults) async {
+    try {
+      await CsvExporter.exportFaults(faults);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Export failed: $e'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    }
   }
 
   Widget _buildFaultTile(Fault fault) {
