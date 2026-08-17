@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -17,10 +18,6 @@ class HistoryScreen extends ConsumerStatefulWidget {
 class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   String _selectedRange = '6h';
   String _selectedParam = 'frequency';
-
-  // Pinch-to-zoom state for Y-axis
-  double _yZoomLevel = 1.0; // 1.0 = fit data, >1 = zoomed in
-  double _yZoomStart = 1.0;
 
   final Map<String, String> _rangeLabels = {
     '1h': 'Last Hour',
@@ -85,10 +82,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     }
   }
 
-  void _resetZoom() {
-    setState(() => _yZoomLevel = 1.0);
-  }
-
   @override
   Widget build(BuildContext context) {
     final logsAsync = ref.watch(logsProvider);
@@ -133,7 +126,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                     onSelected: (_) {
                       setState(() {
                         _selectedRange = e.key;
-                        _yZoomLevel = 1.0; // reset zoom on range change
                       });
                       _loadData();
                     },
@@ -173,7 +165,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                     onSelected: (_) {
                       setState(() {
                         _selectedParam = e.key;
-                        _yZoomLevel = 1.0; // reset zoom on param change
                       });
                     },
                     selectedColor: e.value.color.withValues(alpha: 0.2),
@@ -197,60 +188,19 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
               }).toList(),
             ),
           ),
+          const SizedBox(height: 16),
 
-          // Zoom indicator
-          if (_yZoomLevel != 1.0)
-            Padding(
-              padding: const EdgeInsets.only(top: 8, right: 16),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: AppColors.primary.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.zoom_in_rounded,
-                            color: AppColors.primary, size: 14),
-                        const SizedBox(width: 4),
-                        Text(
-                          '${_yZoomLevel.toStringAsFixed(1)}x',
-                          style: const TextStyle(
-                            color: AppColors.primary,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        GestureDetector(
-                          onTap: _resetZoom,
-                          child: const Icon(Icons.close_rounded,
-                              color: AppColors.primary, size: 14),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          const SizedBox(height: 8),
-
-          // Chart with pinch-to-zoom
+          // Dynamic Chart
           Expanded(
             child: logsAsync.when(
               loading: () => const Center(
-                child:
-                    CircularProgressIndicator(color: AppColors.primary),
+                child: CircularProgressIndicator(color: AppColors.primary),
               ),
               error: (e, _) => Center(
-                child: Text('Error loading data: $e',
-                    style:
-                        const TextStyle(color: AppColors.textSecondary)),
+                child: Text(
+                  'Error loading data: $e',
+                  style: const TextStyle(color: AppColors.textSecondary),
+                ),
               ),
               data: (logs) {
                 if (logs.isEmpty) {
@@ -258,8 +208,11 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.show_chart_rounded,
-                            color: AppColors.textTertiary, size: 48),
+                        const Icon(
+                          Icons.show_chart_rounded,
+                          color: AppColors.textTertiary,
+                          size: 48,
+                        ),
                         const SizedBox(height: 12),
                         const Text(
                           'No data available for this range',
@@ -278,18 +231,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                     ),
                   );
                 }
-                return GestureDetector(
-                  onScaleStart: (_) {
-                    _yZoomStart = _yZoomLevel;
-                  },
-                  onScaleUpdate: (details) {
-                    setState(() {
-                      _yZoomLevel =
-                          (_yZoomStart * details.scale).clamp(0.5, 10.0);
-                    });
-                  },
-                  child: _buildChart(logs, config),
-                );
+                return _buildChart(logs, config);
               },
             ),
           ),
@@ -330,33 +272,33 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
       );
     }).toList();
 
-    // Calculate min/max for Y axis
+    // Dynamically calculate clean Y-scale
     final values = logs.map(_getParamValue).toList();
     final dataMinY = values.reduce((a, b) => a < b ? a : b);
     final dataMaxY = values.reduce((a, b) => a > b ? a : b);
-    final dataRange = dataMaxY - dataMinY;
-    final basePadding = dataRange > 0 ? dataRange * 0.15 : 1.0;
+    final scale = _ChartScale.calculate(dataMinY, dataMaxY);
 
-    // Apply zoom: zoom > 1 narrows the visible Y range around the center
-    final center = (dataMinY + dataMaxY) / 2;
-    final halfRange = (dataRange + basePadding * 2) / (2 * _yZoomLevel);
-    final minY = center - halfRange;
-    final maxY = center + halfRange;
-    final visibleRange = maxY - minY;
+    // Determine X-axis date formatting based on range
+    final isMultiDay = _selectedRange == '7d';
+    final DateFormat timeFormat =
+        isMultiDay ? DateFormat('MM/dd HH:mm') : DateFormat.Hm();
+
+    // Determine step for bottom titles (aim for 4 to 5 ticks)
+    final double xInterval =
+        logs.length > 5 ? (logs.length / 4).ceilToDouble() : 1.0;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.fromLTRB(12, 8, 20, 8),
       child: LineChart(
         LineChartData(
           gridData: FlGridData(
             show: true,
             drawVerticalLine: false,
-            horizontalInterval: visibleRange > 0
-                ? visibleRange / 4
-                : 1,
+            horizontalInterval: scale.interval,
             getDrawingHorizontalLine: (value) => FlLine(
-              color: AppColors.border.withValues(alpha: 0.5),
-              strokeWidth: 0.5,
+              color: AppColors.border.withValues(alpha: 0.4),
+              strokeWidth: 0.8,
+              dashArray: [4, 4],
             ),
           ),
           titlesData: FlTitlesData(
@@ -365,13 +307,27 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
             leftTitles: AxisTitles(
               sideTitles: SideTitles(
                 showTitles: true,
-                reservedSize: 50,
+                interval: scale.interval,
+                reservedSize: 52,
                 getTitlesWidget: (value, meta) {
-                  return Text(
-                    value.toStringAsFixed(1),
-                    style: const TextStyle(
-                      color: AppColors.textTertiary,
-                      fontSize: 10,
+                  // Only show titles within calculated range
+                  if (value < scale.minY - 0.001 || value > scale.maxY + 0.001) {
+                    return const SizedBox.shrink();
+                  }
+                  final text = scale.decimalDigits == 0
+                      ? value.toInt().toString()
+                      : value.toStringAsFixed(scale.decimalDigits);
+
+                  return SideTitleWidget(
+                    meta: meta,
+                    space: 6,
+                    child: Text(
+                      text,
+                      style: const TextStyle(
+                        color: AppColors.textTertiary,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   );
                 },
@@ -380,23 +336,23 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
             bottomTitles: AxisTitles(
               sideTitles: SideTitles(
                 showTitles: true,
-                reservedSize: 30,
-                interval: logs.length > 10
-                    ? (logs.length / 5).ceilToDouble()
-                    : 1,
+                reservedSize: 32,
+                interval: xInterval,
                 getTitlesWidget: (value, meta) {
                   final index = value.toInt();
                   if (index < 0 || index >= logs.length) {
                     return const SizedBox.shrink();
                   }
                   final dt = logs[index].timestamp;
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 8),
+                  return SideTitleWidget(
+                    meta: meta,
+                    space: 6,
                     child: Text(
-                      DateFormat.Hm().format(dt),
+                      timeFormat.format(dt),
                       style: const TextStyle(
                         color: AppColors.textTertiary,
                         fontSize: 10,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
                   );
@@ -405,22 +361,22 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
             ),
           ),
           borderData: FlBorderData(show: false),
-          clipData: const FlClipData.all(), // clip line to chart area when zoomed
           lineBarsData: [
             LineChartBarData(
               spots: spots,
               isCurved: true,
-              curveSmoothness: 0.3,
+              curveSmoothness: 0.35,
+              preventCurveOverShooting: true,
               color: config.color,
-              barWidth: 2.5,
+              barWidth: 2.8,
               isStrokeCapRound: true,
               dotData: FlDotData(
-                show: logs.length < 30,
+                show: logs.length <= 25,
                 getDotPainter: (spot, percent, bar, index) {
                   return FlDotCirclePainter(
-                    radius: 3,
+                    radius: 3.5,
                     color: config.color,
-                    strokeWidth: 1.5,
+                    strokeWidth: 2,
                     strokeColor: AppColors.surface,
                   );
                 },
@@ -431,7 +387,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: [
-                    config.color.withValues(alpha: 0.25),
+                    config.color.withValues(alpha: 0.28),
                     config.color.withValues(alpha: 0.02),
                   ],
                 ),
@@ -439,23 +395,32 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
             ),
           ],
           lineTouchData: LineTouchData(
+            handleBuiltInTouches: true,
             touchTooltipData: LineTouchTooltipData(
               getTooltipColor: (_) => AppColors.surfaceElevated,
               tooltipRoundedRadius: 10,
-              getTooltipItems: (spots) {
-                return spots.map((spot) {
+              tooltipPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              fitInsideHorizontally: true,
+              fitInsideVertically: true,
+              getTooltipItems: (touchedSpots) {
+                return touchedSpots.map((spot) {
                   final index = spot.spotIndex;
+                  if (index < 0 || index >= logs.length) return null;
                   final entry = logs[index];
+                  final val = _getParamValue(entry);
+
                   return LineTooltipItem(
-                    '${_getParamValue(entry).toStringAsFixed(2)} ${config.unit}\n',
+                    '${val.toStringAsFixed(2)} ${config.unit}\n',
                     TextStyle(
                       color: config.color,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14,
                     ),
                     children: [
                       TextSpan(
-                        text: DateFormat('HH:mm:ss').format(entry.timestamp),
+                        text: DateFormat('yyyy-MM-dd HH:mm:ss')
+                            .format(entry.timestamp),
                         style: const TextStyle(
                           color: AppColors.textTertiary,
                           fontWeight: FontWeight.w400,
@@ -468,11 +433,11 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
               },
             ),
           ),
-          minY: minY,
-          maxY: maxY,
+          minY: scale.minY,
+          maxY: scale.maxY,
         ),
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeInOutCubic,
       ),
     );
   }
@@ -494,14 +459,23 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          _statColumn('Min', '${min.toStringAsFixed(1)} ${config.unit}',
-              AppColors.info),
+          _statColumn(
+            'Min',
+            '${min.toStringAsFixed(1)} ${config.unit}',
+            AppColors.info,
+          ),
           Container(width: 1, height: 30, color: AppColors.border),
-          _statColumn('Avg', '${avg.toStringAsFixed(1)} ${config.unit}',
-              config.color),
+          _statColumn(
+            'Avg',
+            '${avg.toStringAsFixed(1)} ${config.unit}',
+            config.color,
+          ),
           Container(width: 1, height: 30, color: AppColors.border),
-          _statColumn('Max', '${max.toStringAsFixed(1)} ${config.unit}',
-              AppColors.warning),
+          _statColumn(
+            'Max',
+            '${max.toStringAsFixed(1)} ${config.unit}',
+            AppColors.warning,
+          ),
         ],
       ),
     );
@@ -511,19 +485,23 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(label,
-            style: const TextStyle(
-              color: AppColors.textTertiary,
-              fontSize: 11,
-              fontWeight: FontWeight.w500,
-            )),
+        Text(
+          label,
+          style: const TextStyle(
+            color: AppColors.textTertiary,
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
         const SizedBox(height: 4),
-        Text(value,
-            style: TextStyle(
-              color: color,
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
-            )),
+        Text(
+          value,
+          style: TextStyle(
+            color: color,
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
       ],
     );
   }
@@ -535,4 +513,96 @@ class _ParamConfig {
   final Color color;
 
   const _ParamConfig(this.label, this.unit, this.color);
+}
+
+/// Helper to compute dynamic, human-friendly "nice" Y-axis bounds and grid steps.
+class _ChartScale {
+  final double minY;
+  final double maxY;
+  final double interval;
+  final int decimalDigits;
+
+  const _ChartScale({
+    required this.minY,
+    required this.maxY,
+    required this.interval,
+    required this.decimalDigits,
+  });
+
+  static _ChartScale calculate(double dataMin, double dataMax) {
+    if (dataMin == dataMax) {
+      if (dataMin == 0) {
+        return const _ChartScale(
+          minY: 0,
+          maxY: 10,
+          interval: 2.5,
+          decimalDigits: 1,
+        );
+      }
+      final margin = (dataMin.abs() * 0.15).clamp(1.0, 50.0);
+      final rawMin = (dataMin - margin).clamp(0.0, double.infinity);
+      final rawMax = dataMin + margin;
+      final range = rawMax - rawMin;
+      final interval = _niceNum(range / 4, round: true);
+      final niceMin = (rawMin / interval).floor() * interval;
+      final niceMax = (rawMax / interval).ceil() * interval;
+      final decimals = interval < 1 ? 2 : (interval % 1 != 0 ? 1 : 0);
+      return _ChartScale(
+        minY: niceMin,
+        maxY: niceMax > niceMin ? niceMax : niceMin + interval * 4,
+        interval: interval > 0 ? interval : 1,
+        decimalDigits: decimals,
+      );
+    }
+
+    final rawRange = dataMax - dataMin;
+    final padding = rawRange * 0.12;
+    final rawMin = (dataMin - padding).clamp(0.0, double.infinity);
+    final rawMax = dataMax + padding;
+    final range = rawMax - rawMin;
+
+    final roughInterval = range / 4;
+    final niceInterval = _niceNum(roughInterval, round: true);
+    final niceMin = (rawMin / niceInterval).floor() * niceInterval;
+    final niceMax = (rawMax / niceInterval).ceil() * niceInterval;
+    final decimals = niceInterval < 1 ? 2 : (niceInterval % 1 != 0 ? 1 : 0);
+
+    return _ChartScale(
+      minY: niceMin,
+      maxY: niceMax > niceMin ? niceMax : niceMin + niceInterval * 4,
+      interval: niceInterval > 0 ? niceInterval : 1,
+      decimalDigits: decimals,
+    );
+  }
+
+  static double _niceNum(double range, {required bool round}) {
+    if (range <= 0) return 1.0;
+    final exponent = (log(range) / ln10).floorToDouble();
+    final fraction = range / pow(10, exponent);
+    double niceFraction;
+
+    if (round) {
+      if (fraction < 1.5) {
+        niceFraction = 1;
+      } else if (fraction < 3) {
+        niceFraction = 2;
+      } else if (fraction < 7) {
+        niceFraction = 5;
+      } else {
+        niceFraction = 10;
+      }
+    } else {
+      if (fraction <= 1) {
+        niceFraction = 1;
+      } else if (fraction <= 2) {
+        niceFraction = 2;
+      } else if (fraction <= 5) {
+        niceFraction = 5;
+      } else {
+        niceFraction = 10;
+      }
+    }
+
+    return niceFraction * pow(10, exponent);
+  }
 }
