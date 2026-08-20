@@ -10,7 +10,7 @@ void Auth::begin() {
             JsonDocument doc;
             DeserializationError err = deserializeJson(doc, f);
             f.close();
-            if (!err && doc.containsKey("pin")) {
+            if (!err && doc["pin"].is<String>()) {
                 _pin = doc["pin"].as<String>();
             }
         }

@@ -146,9 +146,9 @@ class _LiveMonitorScreenState extends ConsumerState<LiveMonitorScreen> {
               // Gauge — third row (1, centered)
               RadialGauge(
                 label: 'Output Power',
-                unit: 'kW',
+                unit: '%',
                 value: status.outputPower,
-                maxValue: 20,
+                maxValue: 150,
                 color: AppColors.gaugePower,
                 size: 150,
               ),
@@ -189,7 +189,7 @@ class _LiveMonitorScreenState extends ConsumerState<LiveMonitorScreen> {
                         '${status.outputCurrent.toStringAsFixed(2)} A',
                         AppColors.gaugeCurrent),
                     _readoutRow('Output Power',
-                        '${status.outputPower.toStringAsFixed(2)} kW',
+                        '${status.outputPower.toStringAsFixed(1)} %',
                         AppColors.gaugePower),
                     _readoutRow(
                       'Fault Code',

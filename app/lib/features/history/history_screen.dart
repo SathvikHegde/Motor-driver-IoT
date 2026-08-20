@@ -43,7 +43,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     'output_current':
         _ParamConfig('Output Current', 'A', AppColors.gaugeCurrent),
     'output_power':
-        _ParamConfig('Output Power', 'kW', AppColors.gaugePower),
+        _ParamConfig('Output Power', '%', AppColors.gaugePower),
   };
 
   @override

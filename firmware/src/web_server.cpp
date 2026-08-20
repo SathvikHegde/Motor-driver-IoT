@@ -106,13 +106,12 @@ void WebServer::_setupRoutes() {
         [this](AsyncWebServerRequest* request, JsonVariant& jsonBody) {
             if (!_checkAuth(request)) return;
 
-            JsonObject body = jsonBody.as<JsonObject>();
-            if (!body.containsKey("action")) {
+            if (!jsonBody["action"].is<String>()) {
                 _sendError(request, 400, "Missing action");
                 return;
             }
 
-            String action = body["action"].as<String>();
+            String action = jsonBody["action"].as<String>();
             bool success = false;
 
             if (action == "start") {
@@ -190,8 +189,10 @@ void WebServer::_setupRoutes() {
         [this](AsyncWebServerRequest* request, JsonVariant& jsonBody) {
             if (!_checkAuth(request)) return;
 
+            JsonDocument configDoc;
+            configDoc.set(jsonBody);
             String json;
-            serializeJson(jsonBody, json);
+            serializeJson(configDoc, json);
             bool success = _logger.updateConfig(json);
 
             JsonDocument doc;

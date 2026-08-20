@@ -22,7 +22,7 @@ bool DataLogger::begin() {
             JsonDocument doc;
             DeserializationError err = deserializeJson(doc, f);
             f.close();
-            if (!err && doc.containsKey("log_interval_seconds")) {
+            if (!err && doc["log_interval_seconds"].is<unsigned long>()) {
                 _logIntervalMs = doc["log_interval_seconds"].as<unsigned long>() * 1000;
             }
         }
@@ -295,7 +295,7 @@ bool DataLogger::updateConfig(const String& json) {
     DeserializationError err = deserializeJson(doc, json);
     if (err) return false;
 
-    if (doc.containsKey("log_interval_seconds")) {
+    if (doc["log_interval_seconds"].is<unsigned long>()) {
         _logIntervalMs = doc["log_interval_seconds"].as<unsigned long>() * 1000;
     }
 

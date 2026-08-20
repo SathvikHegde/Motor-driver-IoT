@@ -317,7 +317,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         ParameterCard(
           label: 'Output Power',
           value: status.outputPower.toStringAsFixed(1),
-          unit: 'kW',
+          unit: '%',
           icon: Icons.power_rounded,
           color: AppColors.gaugePower,
         ),

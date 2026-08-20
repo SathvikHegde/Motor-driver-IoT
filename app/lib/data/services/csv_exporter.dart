@@ -19,7 +19,7 @@ class CsvExporter {
     // Header
     buffer.writeln(
       'Timestamp,Frequency (Hz),Bus Voltage (V),Output Voltage (V),'
-      'Output Current (A),Output Power (kW),Fault Code,Running',
+      'Output Current (A),Output Power (%),Fault Code,Running',
     );
 
     // Data rows

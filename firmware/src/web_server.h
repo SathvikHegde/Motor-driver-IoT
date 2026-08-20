@@ -1,6 +1,7 @@
 #pragma once
-#include <Arduino.h>
 #include <ESPAsyncWebServer.h>
+#include <AsyncJson.h>
+#include <ArduinoJson.h>
 #include "modbus_driver.h"
 #include "data_logger.h"
 #include "auth.h"

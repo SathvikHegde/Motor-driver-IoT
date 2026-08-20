@@ -17,7 +17,7 @@ class DriveStatus {
   /// Output current in Amps.
   final double outputCurrent;
 
-  /// Output power in kW.
+  /// Output power as percentage of rated power (%).
   final double outputPower;
 
   /// Active fault code (0 = no fault).
