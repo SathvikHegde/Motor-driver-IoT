@@ -23,6 +23,12 @@ public:
     /// Read all monitoring registers and fault code. Returns true on success.
     bool readStatus(VFDStatus& status);
 
+    /// Read a single 16-bit register.
+    bool readSingleRegister(uint16_t regAddress, uint16_t& value);
+
+    /// Read N consecutive 16-bit registers.
+    bool readRegisters(uint16_t startReg, uint16_t numRegs, uint16_t* values);
+
     /// Write a control command to register 0x2000.
     bool sendCommand(uint16_t command);
 
@@ -31,8 +37,9 @@ public:
     bool stopDrive()   { return sendCommand(CMD_STOP); }
 
 private:
-    /// Send a Modbus RTU request frame and read the response.
-    /// Returns number of response bytes read, or 0 on failure.
+    /// Send a Modbus RTU request frame and read & parse the response.
+    /// Extracts response, strips any TX echo, validates CRC.
+    /// Returns length of valid response frame starting at response[0], or 0 on error.
     uint8_t sendRequest(uint8_t* request, uint8_t requestLen,
                         uint8_t* response, uint8_t maxResponseLen);
 
@@ -49,4 +56,7 @@ private:
 
     /// Validate response CRC.
     bool validateCRC(const uint8_t* data, uint8_t len);
+
+    /// Debug hex printing helper.
+    void printHex(const char* label, const uint8_t* data, uint8_t len);
 };
