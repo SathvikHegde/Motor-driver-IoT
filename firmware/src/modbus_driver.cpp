@@ -174,6 +174,9 @@ uint8_t ModbusDriver::sendRequest(uint8_t* request, uint8_t requestLen,
         uint8_t rawLen = 0;
         unsigned long startTime = millis();
         unsigned long lastByteTime = 0;
+        int initialPinState = digitalRead(RS485_RX_PIN);
+        int transitions = 0;
+        int lastPinState = initialPinState;
 
         while ((millis() - startTime) < MODBUS_TIMEOUT_MS) {
             while (rs485Serial.available()) {
@@ -185,13 +188,23 @@ uint8_t ModbusDriver::sendRequest(uint8_t* request, uint8_t requestLen,
                 lastByteTime = millis();
             }
 
+            int currentPin = digitalRead(RS485_RX_PIN);
+            if (currentPin != lastPinState) {
+                transitions++;
+                lastPinState = currentPin;
+            }
+
             // If we have received bytes and there's 10ms of line silence, frame is complete
-            if (rawLen > 0 && (millis() - lastByteTime) > 10) {
+            if (rawLen > 0 && (millis() - lastByteTime) > 15) {
                 break;
             }
 
             yield();
         }
+
+        Serial.printf("[Modbus Pin Check] D%d: start_level=%d, end_level=%d, transitions=%d, bytes_received=%d\n",
+                      RS485_RX_PIN == 12 ? 6 : RS485_RX_PIN,
+                      initialPinState, lastPinState, transitions, rawLen);
 
         if (rawLen > 0) {
             printHex("RX (raw)", rawBuf, rawLen);
